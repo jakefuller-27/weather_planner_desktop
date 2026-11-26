@@ -159,6 +159,27 @@ Lets a construction manager click a jobsite on a map and see which of the next 7
 - App result:
 - Match? yes/no:
 
+## Validation results
+
+| Case | Expected | Actual | Result |
+|---|---|---|---|
+| 1 - Fixture A | Wind 18 mph at 1:00 pm; gust 26 mph at 1:00 pm; minimum temperature 27 F at 2:00 pm; rain probability 60% at 4:00 pm | Wind 18 mph at 1:00 pm; gust 26 mph at 1:00 pm; minimum temperature 27 F at 2:00 pm; rain probability 60% at 4:00 pm | PASS |
+| 2 - Threshold boundaries | Wind 14.9 GO, 15/19.9 CAUTION, 20 NO-GO; gust 19.9 GO, 20/24.9 CAUTION, 25 NO-GO; concrete 40 GO, 32–<40 Caution, <32 NO-GO; rain <20 GO, 20–<50 CAUTION, >=50 NO-GO; crane NO-GO precedence and NO DATA behavior | All threshold boundary and missing-variable assertions matched | PASS |
+| 3 - Property check | Every sampled crane, concrete, and roofing combination follows the specified threshold formulas | All sampled property combinations matched | PASS |
+| 4 - Working hours 7:00 AM–4:00 PM | Wind 18 mph at 1:00 pm; gust 26 mph at 1:00 pm; minimum temperature 27 F at 2:00 pm; rain probability 60% at 4:00 pm | Wind 18 mph at 1:00 pm; gust 26 mph at 1:00 pm; minimum temperature 27 F at 2:00 pm; rain probability 60% at 4:00 pm | PASS |
+| 6 - City search Provo | Provo, Utah, within 0.1 degrees of latitude 40.23 and longitude -111.66 | Provo, Utah: 40.23384, -111.65853 | PASS |
+
+### In-app check (done by me)
+I opened the app, clicked today's crane, concrete, and roofing cells for West Jordan, and confirmed the values and ratings match my hand-worked values.
+
+### Case 5: Live check (reference: Open-Meteo raw data and weather.gov)
+- Location: West Jordan (40.6097, -111.9391). Date: Thu Nov 26, 2026. Pulled at: about 8:47 AM.
+- Raw daily values worked by hand from the hourly forecast: max wind 6.7 mph at 2:00 AM; max gust 11.2 mph at 11:00 AM; min temperature 26.9 °F at 5:00 AM; max rain probability 0% at 12:00 AM (all hours tie, first hour used).
+- Hand-worked ratings: crane GO (wind under 15 and gust under 20); concrete NO-GO (26.9 is under 32); roofing GO (0% is under 20).
+- App result: the app calculated the same values and ratings. Match: yes.
+- NWS comparison (weather.gov): weather.gov (forecast for 2 Miles W Midvale, UT, with current conditions from South Valley Regional Airport, last updated Nov 26 at 8:35 AM MST) showed 32 °F and south wind at 6 mph at 8:35 AM; Thanksgiving Day mostly sunny with a high near 52 °F, light and variable wind, and no precipitation chance shown; tonight a low around 35 °F. Open-Meteo showed a high of 51.2 °F at 3:00 PM, 35.6 °F at 11:00 PM, a max wind of 6.7 mph, and 0% rain probability. These agree closely. weather.gov does not list today's overnight low, but its 32 °F reading at 8:35 AM, with Open-Meteo showing 28.2 °F at 8:00 AM and 32.5 °F at 9:00 AM, is consistent with a freezing morning, so the concrete NO-GO rating is supported. The two sources use different forecast models, and weather.gov's point is near Midvale while the app uses West Jordan.
+
+
 ## Out of scope
 - No forecasts beyond 7 days.
 - No saving of jobsites.

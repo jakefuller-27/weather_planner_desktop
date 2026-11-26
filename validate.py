@@ -6,10 +6,12 @@ import urllib.request
 
 from calc import (
     aggregate_daily,
+    build_forecast_url,
     build_geocoding_url,
     parse_geocoding_results,
     rate_crane,
     rate_concrete,
+    rate_daily,
     rate_roofing,
 )
 
@@ -92,6 +94,7 @@ def main():
     case_3()
     case_4()
     case_6()
+    case_5()
 
 
 def _value(value, time="12:00 am"):
@@ -235,6 +238,79 @@ def case_6():
     assert abs(provo["longitude"] - (-111.66)) <= 0.1
     print("Case 6 (city search for Provo): PASS")
     print(provo)
+
+
+def case_5():
+    """Print live West Jordan today's raw and calculated Case 5 values."""
+    url = build_forecast_url(40.6097, -111.9391)
+    context = ssl.create_default_context(cafile="/etc/ssl/cert.pem")
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(
+                request, timeout=20, context=context) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        print(f"Case 5 (live West Jordan today): UNAVAILABLE ({exc})")
+        return
+
+    hourly = data.get("hourly")
+    if not isinstance(hourly, dict) or not hourly.get("time"):
+        print("Case 5 (live West Jordan today): UNAVAILABLE (missing hourly data)")
+        return
+
+    today = hourly["time"][0][:10]
+    indexes = [
+        index for index, timestamp in enumerate(hourly["time"])
+        if timestamp.startswith(today)
+    ]
+
+    print(f"Case 5 (live West Jordan today): {today}")
+    print("Hour | wind mph | gust mph | temperature F | rain probability %")
+    for index in indexes[:24]:
+        print(
+            f"{hourly['time'][index][11:16]} | "
+            f"{hourly['wind_speed_10m'][index]} | "
+            f"{hourly['wind_gusts_10m'][index]} | "
+            f"{hourly['temperature_2m'][index]} | "
+            f"{hourly['precipitation_probability'][index]}"
+        )
+
+    daily = aggregate_daily(hourly)
+    today_daily = next(
+        (day for day in daily if day["date"] == today),
+        None,
+    )
+    if today_daily is None:
+        print("Calculated today's daily values: UNAVAILABLE")
+        return
+
+    ratings = rate_daily(today_daily)
+    print(
+        "Calculated maximum wind: "
+        f"{today_daily['max_wind']['value'] if today_daily['max_wind'] else '--'} mph "
+        f"at {today_daily['max_wind']['time'] if today_daily['max_wind'] else '--'}"
+    )
+    print(
+        "Calculated maximum gust: "
+        f"{today_daily['max_gust']['value'] if today_daily['max_gust'] else '--'} mph "
+        f"at {today_daily['max_gust']['time'] if today_daily['max_gust'] else '--'}"
+    )
+    print(
+        "Calculated minimum temperature: "
+        f"{today_daily['min_temperature']['value'] if today_daily['min_temperature'] else '--'} F "
+        f"at {today_daily['min_temperature']['time'] if today_daily['min_temperature'] else '--'}"
+    )
+    print(
+        "Calculated maximum rain probability: "
+        f"{today_daily['max_rain']['value'] if today_daily['max_rain'] else '--'}% "
+        f"at {today_daily['max_rain']['time'] if today_daily['max_rain'] else '--'}"
+    )
+    print(f"Calculated Crane: {ratings['crane']['rating']}")
+    print(f"Calculated Concrete: {ratings['concrete']['rating']}")
+    print(f"Calculated Roofing: {ratings['roofing']['rating']}")
 
 
 if __name__ == "__main__":
