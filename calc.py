@@ -195,3 +195,125 @@ def aggregate_daily(hourly):
 # Public names for callers that prefer descriptive terminology.
 aggregate_hourly_forecast = aggregate_daily
 aggregate_daily_forecast = aggregate_daily
+
+
+RATING_COLORS = {
+    "GO": "#2E7D32",
+    "CAUTION": "#F9A825",
+    "NO-GO": "#C62828",
+    "NO DATA": "#757575",
+}
+
+
+RATING_ICONS = {
+    "GO": "\u2713",
+    "CAUTION": "!",
+    "NO-GO": "\u00d7",
+    "NO DATA": "?",
+}
+
+
+def _wind_rating(value):
+    if value is None:
+        return None
+    if value < 15:
+        return "GO"
+    if value < 20:
+        return "CAUTION"
+    return "NO-GO"
+
+
+def _gust_rating(value):
+    if value is None:
+        return None
+    if value < 20:
+        return "GO"
+    if value < 25:
+        return "CAUTION"
+    return "NO-GO"
+
+
+def _worse_rating(ratings):
+    rank = {"GO": 0, "CAUTION": 1, "NO-GO": 2}
+    available = [rating for rating in ratings if rating is not None]
+    if not available:
+        return "NO DATA"
+    return max(available, key=lambda rating: rank[rating])
+
+
+def rate_crane(max_wind, max_gust):
+    wind = max_wind["value"] if max_wind is not None else None
+    gust = max_gust["value"] if max_gust is not None else None
+    wind_rating = _wind_rating(wind)
+    gust_rating = _gust_rating(gust)
+
+    if wind_rating == "NO-GO" or gust_rating == "NO-GO":
+        rating = "NO-GO"
+        if wind_rating == "NO-GO" and gust_rating == "NO-GO":
+            limiting = "sustained wind" if wind >= gust else "gust"
+        elif wind_rating == "NO-GO":
+            limiting = "sustained wind"
+        else:
+            limiting = "gust"
+    elif wind_rating is None or gust_rating is None:
+        rating = "NO DATA"
+        limiting = "sustained wind" if wind_rating is None else "gust"
+    else:
+        rating = _worse_rating((wind_rating, gust_rating))
+        if wind_rating == gust_rating:
+            limiting = "sustained wind and gust"
+        elif wind_rating == rating:
+            limiting = "sustained wind"
+        else:
+            limiting = "gust"
+
+    return {
+        "rating": rating,
+        "limiting": limiting,
+        "wind": wind,
+        "wind_rating": wind_rating,
+        "wind_time": max_wind["time"] if max_wind is not None else None,
+        "gust": gust,
+        "gust_rating": gust_rating,
+        "gust_time": max_gust["time"] if max_gust is not None else None,
+    }
+
+
+def rate_concrete(min_temperature):
+    temperature = (
+        min_temperature["value"] if min_temperature is not None else None
+    )
+    if temperature is None:
+        return {"rating": "NO DATA", "limiting": "minimum temperature",
+                "temperature": None, "time": None}
+    if temperature >= 40:
+        rating = "GO"
+    elif temperature >= 32:
+        rating = "CAUTION"
+    else:
+        rating = "NO-GO"
+    return {"rating": rating, "limiting": "minimum temperature",
+            "temperature": temperature, "time": min_temperature["time"]}
+
+
+def rate_roofing(max_rain):
+    rain = max_rain["value"] if max_rain is not None else None
+    if rain is None:
+        return {"rating": "NO DATA", "limiting": "maximum rain probability",
+                "rain": None, "time": None}
+    if rain < 20:
+        rating = "GO"
+    elif rain < 50:
+        rating = "CAUTION"
+    else:
+        rating = "NO-GO"
+    return {"rating": rating, "limiting": "maximum rain probability",
+            "rain": rain, "time": max_rain["time"]}
+
+
+def rate_daily(day):
+    return {
+        "crane": rate_crane(day["max_wind"], day["max_gust"]),
+        "concrete": rate_concrete(day["min_temperature"]),
+        "roofing": rate_roofing(day["max_rain"]),
+    }

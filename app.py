@@ -12,8 +12,12 @@ from calc import (
     DAYS,
     STATUS_COLORS,
     STATUS_ICONS,
+    RATING_COLORS,
+    RATING_ICONS,
     build_forecast_url,
     local_day_labels,
+    aggregate_daily,
+    rate_daily,
 )
 
 
@@ -37,6 +41,8 @@ class WeatherPlannerApp(tk.Tk):
             DEFAULT_LOCATION["longitude"],
         )
         self.forecast_data = None
+        self.daily_forecast = []
+        self.daily_ratings = []
         self.day_labels = list(DAYS)
 
         style = ttk.Style(self)
@@ -285,6 +291,15 @@ class WeatherPlannerApp(tk.Tk):
                           row=row, column=0, sticky="nsew"
                       )
             for column, status in enumerate(statuses, start=1):
+                day_index = column - 1
+                if day_index < len(self.daily_ratings):
+                    key = activity.lower()
+                    rating_data = self.daily_ratings[day_index][key]
+                    status = rating_data["rating"]
+                    day = self.daily_forecast[day_index]
+                else:
+                    rating_data = None
+                    day = None
                 values = (
                     "Wind: -- mph\nGust: -- mph"
                     if activity == "Crane"
@@ -292,24 +307,40 @@ class WeatherPlannerApp(tk.Tk):
                     if activity == "Concrete"
                     else "Rain: --%"
                 )
+                if rating_data is not None:
+                    if activity == "Crane":
+                        values = (
+                            f"Wind: {rating_data['wind'] if rating_data['wind'] is not None else '--'} mph\n"
+                            f"Gust: {rating_data['gust'] if rating_data['gust'] is not None else '--'} mph"
+                        )
+                    elif activity == "Concrete":
+                        values = f"Low: {rating_data['temperature'] if rating_data['temperature'] is not None else '--'} \u00b0F"
+                    else:
+                        values = f"Rain: {rating_data['rain'] if rating_data['rain'] is not None else '--'}%"
                 self.make_rating_button(
-                    grid, status, values, row, column
+                    grid, status, values, row, column,
+                    activity=activity, day=day, rating_data=rating_data
                 )
         self.desktop_calendar = grid
 
-    def make_rating_button(self, parent, status, values, row, column):
+    def make_rating_button(self, parent, status, values, row, column,
+                           activity=None, day=None, rating_data=None):
         frame = tk.Frame(parent, bg="#FFFFFF", highlightthickness=1,
                          highlightbackground=BORDER)
         frame.grid(row=row, column=column, sticky="nsew", padx=0, pady=0)
         frame.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        text = f"{STATUS_ICONS[status]}  {status}\n\n{values}"
-        foreground = "#202020" if status == "CAUTION" else STATUS_COLORS[status]
+        icon = RATING_ICONS.get(status, STATUS_ICONS[status])
+        text = f"{icon}  {status}\n\n{values}"
+        foreground = "#202020" if status == "CAUTION" else RATING_COLORS[status]
         button = tk.Button(
             frame, text=text, fg=foreground, bg="#FFFFFF",
             activebackground="#EDF3F7", activeforeground=foreground,
             relief="flat", bd=0, justify="center",
             font=("TkDefaultFont", 9, "bold"), cursor="hand2",
+            command=(lambda: self.open_reasons(
+                activity, day, rating_data
+            )) if activity is not None else None,
         )
         button.grid(row=0, column=0, sticky="nsew", ipadx=4, ipady=8)
 
@@ -335,16 +366,19 @@ class WeatherPlannerApp(tk.Tk):
             lambda event: canvas.configure(scrollregion=canvas.bbox("all")),
         )
 
-        for day in self.day_labels:
+        for day_index, day in enumerate(self.day_labels):
             card = ttk.Frame(inner, style="Card.TFrame", padding=10)
             card.pack(fill="x", padx=4, pady=4)
             ttk.Label(card, text=day, foreground=ACCENT,
                       font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
-            for activity, status in (
-                ("Crane", "GO"),
-                ("Concrete", "GO"),
-                ("Roofing", "GO"),
-            ):
+            for activity in ("Crane", "Concrete", "Roofing"):
+                status = "GO"
+                rating_data = None
+                day_data = None
+                if day_index < len(self.daily_ratings):
+                    rating_data = self.daily_ratings[day_index][activity.lower()]
+                    status = rating_data["rating"]
+                    day_data = self.daily_forecast[day_index]
                 values = (
                     "Wind -- mph · Gust -- mph"
                     if activity == "Crane"
@@ -352,10 +386,20 @@ class WeatherPlannerApp(tk.Tk):
                     if activity == "Concrete"
                     else "Rain --%"
                 )
-                foreground = "#202020" if status == "CAUTION" else STATUS_COLORS[status]
+                if rating_data is not None:
+                    if activity == "Crane":
+                        values = (
+                            f"Wind {rating_data['wind'] if rating_data['wind'] is not None else '--'} mph · "
+                            f"Gust {rating_data['gust'] if rating_data['gust'] is not None else '--'} mph"
+                        )
+                    elif activity == "Concrete":
+                        values = f"Low {rating_data['temperature'] if rating_data['temperature'] is not None else '--'} \u00b0F"
+                    else:
+                        values = f"Rain {rating_data['rain'] if rating_data['rain'] is not None else '--'}%"
+                foreground = "#202020" if status == "CAUTION" else RATING_COLORS[status]
                 tk.Button(
                     card,
-                    text=f"{STATUS_ICONS[status]}  {status}   {activity} · {values}",
+                    text=f"{RATING_ICONS[status]}  {status}   {activity} · {values}",
                     fg=foreground,
                     bg="#FFFFFF",
                     activebackground="#EDF3F7",
@@ -363,6 +407,8 @@ class WeatherPlannerApp(tk.Tk):
                     bd=1,
                     font=("TkDefaultFont", 9),
                     cursor="hand2",
+                    command=(lambda a=activity, d=day_data, r=rating_data:
+                             self.open_reasons(a, d, r)),
                 ).pack(fill="x", pady=3, ipady=5)
         self.phone_calendar = cards
 
@@ -389,14 +435,67 @@ class WeatherPlannerApp(tk.Tk):
     def build_reasons(self, parent):
         reasons = ttk.Frame(parent, style="Card.TFrame", padding=12)
         reasons.grid(row=7, column=0, sticky="ew")
-        ttk.Label(reasons, text="Why this rating?",
-                  foreground=ACCENT,
-                  font=("TkDefaultFont", 11, "bold")).pack(anchor="w")
-        ttk.Label(
+        self.reasons_title = ttk.Label(
+            reasons, text="Why this rating?",
+            foreground=ACCENT, font=("TkDefaultFont", 11, "bold")
+        )
+        self.reasons_title.pack(anchor="w")
+        self.reasons_text = ttk.Label(
             reasons,
             text="Select a calendar cell to see the variables and thresholds.",
             foreground=COOL_GRAY,
-        ).pack(anchor="w", pady=(6, 0))
+            justify="left",
+        )
+        self.reasons_text.pack(anchor="w", pady=(6, 0))
+
+    def open_reasons(self, activity, day, rating_data):
+        if activity is None or day is None or rating_data is None:
+            return
+        date = day["date"]
+        rating = rating_data["rating"]
+        if activity == "Crane":
+            wind = rating_data["wind"]
+            gust = rating_data["gust"]
+            lines = [
+                f"Activity: Crane",
+                f"Date: {date}",
+                f"Rating: {rating}",
+                f"Sustained wind: {wind if wind is not None else '--'} mph "
+                f"(GO < 15; Caution 15–<20; NO-GO >= 20)"
+                f"{' at ' + rating_data['wind_time'] if rating_data['wind_time'] else ''}",
+                f"Gust: {gust if gust is not None else '--'} mph "
+                "(GO < 20; Caution 20–<25; NO-GO >= 25)"
+                f"{' at ' + rating_data['gust_time'] if rating_data['gust_time'] else ''}",
+                f"Limiting variable: {rating_data['limiting']}",
+                "Wind is forecast at 10 m above ground and likely understates wind at boom height. "
+                "Always follow the crane manufacturer's limits and site wind readings.",
+            ]
+        elif activity == "Concrete":
+            temperature = rating_data["temperature"]
+            lines = [
+                f"Activity: Concrete",
+                f"Date: {date}",
+                f"Rating: {rating}",
+                f"Minimum temperature: {temperature if temperature is not None else '--'} °F "
+                "(GO >= 40; Caution 32–<40; NO-GO < 32)"
+                f"{' at ' + rating_data['time'] if rating_data['time'] else ''}",
+                f"Limiting variable: {rating_data['limiting']}",
+            ]
+        else:
+            rain = rating_data["rain"]
+            lines = [
+                f"Activity: Roofing",
+                f"Date: {date}",
+                f"Rating: {rating}",
+                f"Maximum rain probability: {rain if rain is not None else '--'}% "
+                "(GO < 20; Caution 20–<50; NO-GO >= 50)"
+                f"{' at ' + rating_data['time'] if rating_data['time'] else ''}",
+                f"Limiting variable: {rating_data['limiting']}",
+            ]
+        self.reasons_title.configure(
+            text=f"{RATING_ICONS[rating]}  {activity}: {rating}"
+        )
+        self.reasons_text.configure(text="\n".join(lines))
 
     def build_disclaimer(self, parent):
         disclaimer = ttk.Label(
@@ -489,6 +588,10 @@ class WeatherPlannerApp(tk.Tk):
         }
         self.map_center = (latitude, longitude)
         self.forecast_data = data
+        self.daily_forecast = aggregate_daily(hourly)
+        self.daily_ratings = [
+            rate_daily(day) for day in self.daily_forecast
+        ]
         self.day_labels = local_day_labels(hourly["time"])
 
         self.jobsite_label.configure(

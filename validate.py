@@ -1,6 +1,11 @@
 """Validation for Stage 3 Case 1 (Fixture A)."""
 
-from calc import aggregate_daily
+from calc import (
+    aggregate_daily,
+    rate_crane,
+    rate_concrete,
+    rate_roofing,
+)
 
 
 FIXTURE_A = {
@@ -76,6 +81,99 @@ def main():
 
     print("Case 1 (Fixture A): PASS")
     print(actual)
+
+    case_2()
+    case_3()
+
+
+def _value(value, time="12:00 am"):
+    return {"value": value, "time": time, "available": True}
+
+
+def case_2():
+    wind_cases = [
+        (14.9, "GO"),
+        (15, "CAUTION"),
+        (19.9, "CAUTION"),
+        (20, "NO-GO"),
+    ]
+    for value, expected in wind_cases:
+        result = rate_crane(_value(value), _value(10))
+        assert result["rating"] == expected, (
+            f"wind boundary {value}: {result['rating']} != {expected}"
+        )
+
+    gust_cases = [
+        (19.9, "GO"),
+        (20, "CAUTION"),
+        (24.9, "CAUTION"),
+        (25, "NO-GO"),
+    ]
+    for value, expected in gust_cases:
+        result = rate_crane(_value(10), _value(value))
+        assert result["rating"] == expected, (
+            f"gust boundary {value}: {result['rating']} != {expected}"
+        )
+
+    concrete_cases = [(40, "GO"), (39.9, "CAUTION"),
+                      (32, "CAUTION"), (31.9, "NO-GO")]
+    for value, expected in concrete_cases:
+        result = rate_concrete(_value(value))
+        assert result["rating"] == expected
+
+    roofing_cases = [(19.9, "GO"), (20, "CAUTION"),
+                     (49.9, "CAUTION"), (50, "NO-GO")]
+    for value, expected in roofing_cases:
+        result = rate_roofing(_value(value))
+        assert result["rating"] == expected
+
+    crane_wind_missing = rate_crane(None, _value(30))
+    assert crane_wind_missing["rating"] == "NO-GO"
+    crane_gust_missing = rate_crane(_value(30), None)
+    assert crane_gust_missing["rating"] == "NO-GO"
+    both_missing = rate_crane(None, None)
+    assert both_missing["rating"] == "NO DATA"
+
+    print("Case 2 (threshold boundaries): PASS")
+
+
+def case_3():
+    wind_values = [0, 14.999, 15, 19.999, 20, 35]
+    gust_values = [0, 19.999, 20, 24.999, 25, 40]
+    temperature_values = [31, 31.999, 32, 39.999, 40, 50]
+    rain_values = [0, 19.999, 20, 49.999, 50, 100]
+    rank = {"GO": 0, "CAUTION": 1, "NO-GO": 2}
+
+    for wind in wind_values:
+        for gust in gust_values:
+            result = rate_crane(_value(wind), _value(gust))
+            wind_rating = (
+                "GO" if wind < 15 else
+                "CAUTION" if wind < 20 else "NO-GO"
+            )
+            gust_rating = (
+                "GO" if gust < 20 else
+                "CAUTION" if gust < 25 else "NO-GO"
+            )
+            expected = max(
+                (wind_rating, gust_rating),
+                key=lambda rating: rank[rating],
+            )
+            assert result["rating"] == expected
+
+    for temperature in temperature_values:
+        expected = "GO" if temperature >= 40 else (
+            "CAUTION" if temperature >= 32 else "NO-GO"
+        )
+        assert rate_concrete(_value(temperature))["rating"] == expected
+
+    for rain in rain_values:
+        expected = "GO" if rain < 20 else (
+            "CAUTION" if rain < 50 else "NO-GO"
+        )
+        assert rate_roofing(_value(rain))["rating"] == expected
+
+    print("Case 3 (property check): PASS")
 
 
 if __name__ == "__main__":
