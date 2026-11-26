@@ -1,7 +1,20 @@
 import tkinter as tk
 from tkinter import ttk
+import json
+import threading
+import urllib.request
+import ssl
+import os
+from datetime import datetime
 
-from calc import DEFAULT_LOCATION, DAYS, STATUS_COLORS, STATUS_ICONS
+from calc import (
+    DEFAULT_LOCATION,
+    DAYS,
+    STATUS_COLORS,
+    STATUS_ICONS,
+    build_forecast_url,
+    local_day_labels,
+)
 
 
 ACCENT = "#1F4E79"
@@ -17,6 +30,14 @@ class WeatherPlannerApp(tk.Tk):
         self.geometry("1120x820")
         self.minsize(720, 620)
         self.configure(bg="#EEF2F5")
+
+        self.selected_location = dict(DEFAULT_LOCATION)
+        self.map_center = (
+            DEFAULT_LOCATION["latitude"],
+            DEFAULT_LOCATION["longitude"],
+        )
+        self.forecast_data = None
+        self.day_labels = list(DAYS)
 
         style = ttk.Style(self)
         style.theme_use("clam")
@@ -85,6 +106,7 @@ class WeatherPlannerApp(tk.Tk):
         self.build_disclaimer(container)
 
         self.bind("<Configure>", self.on_resize)
+        self.after(100, self.initial_forecast)
 
     def build_header(self, parent):
         header = ttk.Frame(parent)
@@ -108,6 +130,7 @@ class WeatherPlannerApp(tk.Tk):
             highlightthickness=0,
         )
         self.map_canvas.grid(row=0, column=0, sticky="ew")
+        self.map_canvas.bind("<Button-1>", self.on_map_click)
         self.draw_map()
 
     def draw_map(self):
@@ -129,13 +152,33 @@ class WeatherPlannerApp(tk.Tk):
         cx, cy = width * 0.50, height * 0.50
         canvas.create_oval(cx - 9, cy - 9, cx + 9, cy + 9,
                            fill=ACCENT, outline="#FFFFFF", width=2, tags="map")
+        latitude = self.selected_location["latitude"]
+        longitude = self.selected_location["longitude"]
         canvas.create_text(
             cx, cy - 18,
-            text="West Jordan",
+            text=(self.selected_location["name"]
+                  if self.selected_location["name"] == "West Jordan, UT"
+                  else f"{latitude:.4f}, {longitude:.4f}"),
             fill="#1E2933",
             font=("TkDefaultFont", 9, "bold"),
             tags="map",
         )
+
+    def on_map_click(self, event):
+        canvas = self.map_canvas
+        width = max(canvas.winfo_width(), 700)
+        longitude = ((event.x / width) * 360) - 180
+        height = 230
+        latitude = 90 - ((event.y / height) * 180)
+        latitude = max(-90.0, min(90.0, latitude))
+        longitude = max(-180.0, min(180.0, longitude))
+        candidate = {
+            "name": f"{latitude:.4f}, {longitude:.4f}",
+            "latitude": latitude,
+            "longitude": longitude,
+            "time_zone": "",
+        }
+        self.fetch_forecast(candidate)
 
     def build_jobsite(self, parent):
         jobsite = ttk.Frame(parent, style="Card.TFrame", padding=10)
@@ -149,26 +192,38 @@ class WeatherPlannerApp(tk.Tk):
             f"{lat:.4f}, {lon:.4f}\n"
             f"{DEFAULT_LOCATION['time_zone']}"
         )
-        ttk.Label(jobsite, text=text, justify="left").grid(
+        self.jobsite_label = ttk.Label(jobsite, text=text, justify="left")
+        self.jobsite_label.grid(
             row=0, column=0, sticky="w"
         )
-        refresh = ttk.Button(jobsite, text="Refresh", state="disabled",
-                             style="Accent.TButton")
-        refresh.grid(row=0, column=1, padx=(10, 0))
+        self.refresh_button = ttk.Button(
+            jobsite, text="Refresh", state="disabled",
+            style="Accent.TButton", command=self.refresh_forecast
+        )
+        self.refresh_button.grid(row=0, column=1, padx=(10, 0))
 
     def build_status(self, parent):
         status = ttk.Frame(parent)
         status.grid(row=3, column=0, sticky="ew", pady=(0, 8))
         status.columnconfigure(0, weight=1)
-        ttk.Label(status, text="Loading forecast...",
-                  foreground=ACCENT).grid(row=0, column=0, sticky="w")
-        ttk.Label(status, text="Could not load the forecast.",
-                  foreground=STATUS_COLORS["NO-GO"]).grid(
-                      row=0, column=1, padx=10, sticky="e"
-                  )
-        ttk.Button(status, text="Try again", state="disabled").grid(
+        self.loading_label = ttk.Label(
+            status, text="Loading forecast...", foreground=ACCENT
+        )
+        self.loading_label.grid(row=0, column=0, sticky="w")
+        self.error_label = ttk.Label(
+            status, text="Could not load the forecast.",
+            foreground=STATUS_COLORS["NO-GO"]
+        )
+        self.error_label.grid(row=0, column=1, padx=10, sticky="e")
+        self.try_again_button = ttk.Button(
+            status, text="Try again", state="disabled",
+            command=self.try_again
+        )
+        self.try_again_button.grid(
             row=0, column=2, sticky="e"
         )
+        self.error_label.grid_remove()
+        self.try_again_button.grid_remove()
 
     def build_calendar(self, parent):
         self.calendar_host = ttk.Frame(parent)
@@ -182,6 +237,15 @@ class WeatherPlannerApp(tk.Tk):
             self.show_desktop_calendar()
         else:
             self.show_phone_cards()
+
+    def rebuild_calendar_layout(self):
+        if self.desktop_calendar is not None:
+            self.desktop_calendar.destroy()
+            self.desktop_calendar = None
+        if self.phone_calendar is not None:
+            self.phone_calendar.destroy()
+            self.phone_calendar = None
+        self.update_layout()
 
     def show_desktop_calendar(self):
         if self.desktop_calendar is not None:
@@ -199,7 +263,7 @@ class WeatherPlannerApp(tk.Tk):
                   borderwidth=1, relief="solid").grid(
                       row=0, column=0, sticky="nsew"
                   )
-        for column, day in enumerate(DAYS, start=1):
+        for column, day in enumerate(self.day_labels, start=1):
             ttk.Label(grid, text=day, style="Head.TLabel",
                       borderwidth=1, relief="solid").grid(
                           row=0, column=column, sticky="nsew"
@@ -271,7 +335,7 @@ class WeatherPlannerApp(tk.Tk):
             lambda event: canvas.configure(scrollregion=canvas.bbox("all")),
         )
 
-        for day in DAYS:
+        for day in self.day_labels:
             card = ttk.Frame(inner, style="Card.TFrame", padding=10)
             card.pack(fill="x", padx=4, pady=4)
             ttk.Label(card, text=day, foreground=ACCENT,
@@ -303,8 +367,10 @@ class WeatherPlannerApp(tk.Tk):
         self.phone_calendar = cards
 
     def build_pull_line(self, parent):
-        ttk.Label(parent, text="Forecast pulled at --",
-                  foreground=COOL_GRAY).grid(
+        self.pull_label = ttk.Label(
+            parent, text="Forecast pulled at --", foreground=COOL_GRAY
+        )
+        self.pull_label.grid(
                       row=5, column=0, sticky="w", pady=(8, 4)
                   )
 
@@ -344,6 +410,115 @@ class WeatherPlannerApp(tk.Tk):
             justify="left",
         )
         disclaimer.grid(row=8, column=0, sticky="ew", pady=(14, 0))
+
+    def initial_forecast(self):
+        self.fetch_forecast(dict(DEFAULT_LOCATION))
+
+    def refresh_forecast(self):
+        self.fetch_forecast(dict(self.selected_location))
+
+    def try_again(self):
+        self.fetch_forecast(dict(self.selected_location))
+
+    def fetch_forecast(self, candidate):
+        self.loading_label.grid(row=0, column=0, sticky="w")
+        self.error_label.grid_remove()
+        self.try_again_button.grid_remove()
+        self.calendar_host.grid_remove()
+        self.refresh_button.configure(state="disabled")
+
+        def worker():
+            url = build_forecast_url(
+                candidate["latitude"], candidate["longitude"]
+            )
+            try:
+                request = urllib.request.Request(
+                    url,
+                    headers={"Accept": "application/json"},
+                )
+                ssl_context = ssl.create_default_context()
+                for ca_bundle in (
+                    "/etc/ssl/cert.pem",
+                    "/Library/Frameworks/Python.framework/Versions/3.15/etc/openssl/cert.pem",
+                ):
+                    if os.path.isfile(ca_bundle):
+                        ssl_context = ssl.create_default_context(
+                            cafile=ca_bundle
+                        )
+                        break
+                with urllib.request.urlopen(
+                        request, timeout=15, context=ssl_context) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                self.after(
+                    0,
+                    lambda: self.forecast_succeeded(candidate, data),
+                )
+            except Exception:
+                self.after(0, lambda: self.forecast_failed())
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def forecast_succeeded(self, candidate, data):
+        hourly = data.get("hourly", {})
+        required = (
+            "time",
+            "temperature_2m",
+            "wind_speed_10m",
+            "wind_gusts_10m",
+            "precipitation_probability",
+        )
+        if not isinstance(hourly, dict) or not all(
+                key in hourly for key in required):
+            self.forecast_failed()
+            return
+
+        time_zone = data.get("timezone", "")
+        if not time_zone:
+            self.forecast_failed()
+            return
+
+        keep_initial_name = candidate["name"] == "West Jordan, UT"
+        latitude = candidate["latitude"]
+        longitude = candidate["longitude"]
+        self.selected_location = {
+            "name": ("West Jordan, UT" if keep_initial_name
+                     else f"{latitude:.4f}, {longitude:.4f}"),
+            "latitude": latitude,
+            "longitude": longitude,
+            "time_zone": time_zone,
+        }
+        self.map_center = (latitude, longitude)
+        self.forecast_data = data
+        self.day_labels = local_day_labels(hourly["time"])
+
+        self.jobsite_label.configure(
+            text=(f"{self.selected_location['name']}\n"
+                  f"{latitude:.4f}, {longitude:.4f}\n"
+                  f"{time_zone}")
+        )
+        now = datetime.now().astimezone()
+        hour = now.strftime("%I").lstrip("0") or "0"
+        pull_time = now.strftime(f"%A, %B %d, %Y at {hour}:%M %p")
+        self.pull_label.configure(text=f"Forecast pulled at {pull_time}")
+
+        self.loading_label.grid_remove()
+        self.error_label.grid_remove()
+        self.try_again_button.grid_remove()
+        self.calendar_host.grid(row=4, column=0, sticky="nsew")
+        self.refresh_button.configure(state="normal")
+        self.rebuild_calendar_layout()
+        self.draw_map()
+
+    def forecast_failed(self):
+        self.loading_label.grid_remove()
+        self.error_label.grid()
+        self.try_again_button.configure(state="normal")
+        self.try_again_button.grid(row=0, column=2, sticky="e")
+        self.refresh_button.configure(state="normal")
+        if self.forecast_data is None:
+            self.calendar_host.grid_remove()
+        else:
+            self.calendar_host.grid(row=4, column=0, sticky="nsew")
 
     def on_resize(self, event):
         if event.widget is self:
