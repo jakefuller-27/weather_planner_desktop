@@ -36,6 +36,7 @@ STATUS_ICONS = {
 
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
 
 def build_forecast_url(latitude, longitude):
@@ -52,6 +53,33 @@ def build_forecast_url(latitude, longitude):
         "forecast_days": 7,
     }
     return f"{FORECAST_URL}?{urlencode(params)}"
+
+
+def build_geocoding_url(name):
+    params = {
+        "name": name,
+        "count": 5,
+        "language": "en",
+        "format": "json",
+    }
+    return f"{GEOCODING_URL}?{urlencode(params)}"
+
+
+def parse_geocoding_results(payload):
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        return []
+    matches = []
+    for result in payload["results"][:5]:
+        if not isinstance(result, dict):
+            continue
+        matches.append({
+            "name": result.get("name", ""),
+            "admin1": result.get("admin1", ""),
+            "country": result.get("country", ""),
+            "latitude": result.get("latitude"),
+            "longitude": result.get("longitude"),
+        })
+    return matches
 
 
 def local_day_labels(hourly_times):
@@ -119,7 +147,7 @@ def _aggregate_variable(values, timestamps, maximum):
     }
 
 
-def aggregate_daily(hourly):
+def aggregate_daily(hourly, start_hour=None, end_hour=None):
     """
     Aggregate 24 hourly values for each local calendar date.
 
@@ -157,6 +185,11 @@ def aggregate_daily(hourly):
             index for index, timestamp in enumerate(timestamps)
             if isinstance(timestamp, str) and timestamp.startswith(date)
         ]
+        if start_hour is not None and end_hour is not None:
+            indexes = [
+                index for index in indexes
+                if start_hour <= int(timestamps[index][11:13]) <= end_hour
+            ]
         if not indexes:
             continue
 
@@ -175,7 +208,7 @@ def aggregate_daily(hourly):
                     for index in indexes]
 
         def aggregate(values, maximum):
-            if len(values) != 24:
+            if not values:
                 return None
             if any(value is None for value in values):
                 return None

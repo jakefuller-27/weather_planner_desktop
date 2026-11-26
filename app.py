@@ -15,6 +15,8 @@ from calc import (
     RATING_COLORS,
     RATING_ICONS,
     build_forecast_url,
+    build_geocoding_url,
+    parse_geocoding_results,
     local_day_labels,
     aggregate_daily,
     rate_daily,
@@ -44,6 +46,10 @@ class WeatherPlannerApp(tk.Tk):
         self.daily_forecast = []
         self.daily_ratings = []
         self.day_labels = list(DAYS)
+        self.valid_start_hour = 0
+        self.valid_end_hour = 23
+        self.working_start_hour = 0
+        self.working_end_hour = 23
 
         style = ttk.Style(self)
         style.theme_use("clam")
@@ -125,6 +131,32 @@ class WeatherPlannerApp(tk.Tk):
             style="Hint.TLabel",
         ).pack(anchor="w", pady=(2, 0))
 
+        search_frame = ttk.Frame(header)
+        search_frame.pack(fill="x", pady=(10, 0))
+        self.city_search_entry = tk.Entry(
+            search_frame, font=("TkDefaultFont", 10),
+        )
+        self.city_search_entry.insert(0, "Search for a city")
+        self.city_search_entry.configure(
+            foreground=COOL_GRAY
+        )
+        self.city_search_entry.bind(
+            "<FocusIn>", self.clear_city_placeholder
+        )
+        self.city_search_entry.bind("<Return>", lambda event: self.search_city())
+        self.city_search_entry.pack(side="left", fill="x", expand=True,
+                                    ipady=5)
+        ttk.Button(search_frame, text="Search",
+                   command=self.search_city).pack(
+                       side="left", padx=(8, 0), ipadx=8
+                   )
+        self.city_search_status = ttk.Label(
+            header, text="", foreground=COOL_GRAY
+        )
+        self.city_search_status.pack(anchor="w", pady=(4, 0))
+        self.city_search_results = ttk.Frame(header)
+        self.city_search_results.pack(fill="x", pady=(4, 0))
+
     def build_map(self, parent):
         map_card = tk.Frame(parent, bg="#FFFFFF", highlightthickness=1,
                             highlightbackground=BORDER)
@@ -170,6 +202,141 @@ class WeatherPlannerApp(tk.Tk):
             tags="map",
         )
 
+    def clear_city_placeholder(self, event):
+        if self.city_search_entry.get() == "Search for a city":
+            self.city_search_entry.delete(0, "end")
+            self.city_search_entry.configure(foreground="#1E2933")
+
+    def parse_hour_label(self, label):
+        try:
+            text = label.strip()
+            meridiem = text[-2:]
+            clock = text[:-3].strip()
+            hour, minute = (int(part) for part in clock.split(":"))
+            if meridiem == "PM" and hour != 12:
+                hour += 12
+            if meridiem == "AM" and hour == 12:
+                hour = 0
+            return hour
+        except (ValueError, AttributeError):
+            return 0
+
+    def validate_working_hours(self):
+        start = self.parse_hour_label(self.start_hour.get())
+        end = self.parse_hour_label(self.end_hour.get())
+        if end <= start:
+            self.hours_validation.configure(
+                text="End must be later than Start."
+            )
+            return
+        self.hours_validation.configure(text="")
+        self.valid_start_hour = start
+        self.valid_end_hour = end
+        self.working_start_hour = start
+        self.working_end_hour = end
+        self.working_hours_label.configure(
+            text=(f"Ratings use working hours "
+                  f"{self.start_hour.get()} to {self.end_hour.get()}.")
+        )
+        self.reaggregate_forecast()
+
+    def reaggregate_forecast(self):
+        if not self.forecast_data:
+            return
+        hourly = self.forecast_data.get("hourly", {})
+        self.daily_forecast = aggregate_daily(
+            hourly,
+            start_hour=self.valid_start_hour,
+            end_hour=self.valid_end_hour,
+        )
+        self.daily_ratings = [
+            rate_daily(day) for day in self.daily_forecast
+        ]
+        self.rebuild_calendar_layout()
+
+    def clear_search_results(self):
+        for widget in self.city_search_results.winfo_children():
+            widget.destroy()
+
+    def search_city(self):
+        query = self.city_search_entry.get().strip()
+        if query == "Search for a city":
+            query = ""
+        self.clear_search_results()
+        if len(query) < 2:
+            self.city_search_status.configure(
+                text="Enter at least 2 characters.",
+                foreground=STATUS_COLORS["NO-GO"],
+            )
+            return
+
+        self.city_search_status.configure(
+            text="Searching...", foreground=ACCENT
+        )
+
+        def worker():
+            try:
+                url = build_geocoding_url(query)
+                context = ssl.create_default_context()
+                for ca_bundle in (
+                    "/etc/ssl/cert.pem",
+                    "/Library/Frameworks/Python.framework/Versions/3.15/etc/openssl/cert.pem",
+                ):
+                    if os.path.isfile(ca_bundle):
+                        context = ssl.create_default_context(cafile=ca_bundle)
+                        break
+                request = urllib.request.Request(
+                    url, headers={"Accept": "application/json"}
+                )
+                with urllib.request.urlopen(
+                        request, timeout=15, context=context) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                matches = parse_geocoding_results(payload)
+                self.after(0, lambda: self.show_city_matches(matches))
+            except Exception:
+                self.after(0, lambda: self.show_city_search_error())
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_city_matches(self, matches):
+        self.clear_search_results()
+        if not matches:
+            self.city_search_status.configure(
+                text="No matches found.", foreground=COOL_GRAY
+            )
+            return
+        self.city_search_status.configure(text="", foreground=COOL_GRAY)
+        for match in matches:
+            name = match["name"]
+            region = match["admin1"]
+            country = match["country"]
+            label = ", ".join(
+                part for part in (name, region, country) if part
+            )
+            ttk.Button(
+                self.city_search_results,
+                text=label,
+                command=lambda m=match: self.select_city_match(m),
+            ).pack(side="left", padx=(0, 6), pady=2)
+
+    def show_city_search_error(self):
+        self.clear_search_results()
+        self.city_search_status.configure(
+            text="Search failed. Try again.",
+            foreground=STATUS_COLORS["NO-GO"],
+        )
+
+    def select_city_match(self, match):
+        candidate = {
+            "name": match["name"],
+            "latitude": match["latitude"],
+            "longitude": match["longitude"],
+            "time_zone": "",
+        }
+        self.clear_search_results()
+        self.city_search_status.configure(text="", foreground=COOL_GRAY)
+        self.fetch_forecast(candidate)
+
     def on_map_click(self, event):
         canvas = self.map_canvas
         width = max(canvas.winfo_width(), 700)
@@ -207,6 +374,39 @@ class WeatherPlannerApp(tk.Tk):
             style="Accent.TButton", command=self.refresh_forecast
         )
         self.refresh_button.grid(row=0, column=1, padx=(10, 0))
+
+        hours = (
+            "12:00 AM", "1:00 AM", "2:00 AM", "3:00 AM",
+            "4:00 AM", "5:00 AM", "6:00 AM", "7:00 AM",
+            "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM",
+            "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM",
+            "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM",
+            "8:00 PM", "9:00 PM", "10:00 PM", "11:00 PM",
+            "11:59 PM",
+        )
+        hours_frame = ttk.Frame(jobsite)
+        hours_frame.grid(row=1, column=0, columnspan=2,
+                         sticky="w", pady=(8, 0))
+        ttk.Label(hours_frame, text="Start").pack(side="left")
+        self.start_hour = ttk.Combobox(
+            hours_frame, values=hours, state="readonly", width=10
+        )
+        self.start_hour.set("12:00 AM")
+        self.start_hour.pack(side="left", padx=(5, 12))
+        ttk.Label(hours_frame, text="End").pack(side="left")
+        self.end_hour = ttk.Combobox(
+            hours_frame, values=hours, state="readonly", width=10
+        )
+        self.end_hour.set("11:59 PM")
+        self.end_hour.pack(side="left", padx=(5, 0))
+        self.start_hour.bind("<<ComboboxSelected>>",
+                             lambda event: self.validate_working_hours())
+        self.end_hour.bind("<<ComboboxSelected>>",
+                           lambda event: self.validate_working_hours())
+        self.hours_validation = ttk.Label(
+            hours_frame, text="", foreground=STATUS_COLORS["NO-GO"]
+        )
+        self.hours_validation.pack(side="left", padx=(12, 0))
 
     def build_status(self, parent):
         status = ttk.Frame(parent)
@@ -419,6 +619,14 @@ class WeatherPlannerApp(tk.Tk):
         self.pull_label.grid(
                       row=5, column=0, sticky="w", pady=(8, 4)
                   )
+        self.working_hours_label = ttk.Label(
+            parent,
+            text="Ratings use working hours 12:00 AM to 11:59 PM",
+            foreground=COOL_GRAY,
+        )
+        self.working_hours_label.grid(
+            row=5, column=0, sticky="w", pady=(30, 4)
+        )
 
     def build_legend(self, parent):
         legend = ttk.Frame(parent, style="Card.TFrame", padding=10)
@@ -492,6 +700,9 @@ class WeatherPlannerApp(tk.Tk):
                 f"{' at ' + rating_data['time'] if rating_data['time'] else ''}",
                 f"Limiting variable: {rating_data['limiting']}",
             ]
+        lines.append(
+            f"Working hours: {self.start_hour.get()} to {self.end_hour.get()}"
+        )
         self.reasons_title.configure(
             text=f"{RATING_ICONS[rating]}  {activity}: {rating}"
         )
@@ -581,14 +792,18 @@ class WeatherPlannerApp(tk.Tk):
         longitude = candidate["longitude"]
         self.selected_location = {
             "name": ("West Jordan, UT" if keep_initial_name
-                     else f"{latitude:.4f}, {longitude:.4f}"),
+                     else candidate["name"]),
             "latitude": latitude,
             "longitude": longitude,
             "time_zone": time_zone,
         }
         self.map_center = (latitude, longitude)
         self.forecast_data = data
-        self.daily_forecast = aggregate_daily(hourly)
+        self.daily_forecast = aggregate_daily(
+            hourly,
+            start_hour=self.valid_start_hour,
+            end_hour=self.valid_end_hour,
+        )
         self.daily_ratings = [
             rate_daily(day) for day in self.daily_forecast
         ]

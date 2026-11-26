@@ -1,7 +1,13 @@
 """Validation for Stage 3 Case 1 (Fixture A)."""
 
+import json
+import ssl
+import urllib.request
+
 from calc import (
     aggregate_daily,
+    build_geocoding_url,
+    parse_geocoding_results,
     rate_crane,
     rate_concrete,
     rate_roofing,
@@ -84,6 +90,8 @@ def main():
 
     case_2()
     case_3()
+    case_4()
+    case_6()
 
 
 def _value(value, time="12:00 am"):
@@ -174,6 +182,59 @@ def case_3():
         assert rate_roofing(_value(rain))["rating"] == expected
 
     print("Case 3 (property check): PASS")
+
+
+def case_4():
+    day = aggregate_daily(FIXTURE_A, start_hour=7, end_hour=16)[0]
+    actual = {
+        "max_wind": day["max_wind"]["value"],
+        "max_wind_hour": day["max_wind"]["time"],
+        "max_gust": day["max_gust"]["value"],
+        "max_gust_hour": day["max_gust"]["time"],
+        "min_temperature": day["min_temperature"]["value"],
+        "min_temperature_hour": day["min_temperature"]["time"],
+        "max_rain": day["max_rain"]["value"],
+        "max_rain_hour": day["max_rain"]["time"],
+    }
+    expected = {
+        "max_wind": 18,
+        "max_wind_hour": "1:00 pm",
+        "max_gust": 26,
+        "max_gust_hour": "1:00 pm",
+        "min_temperature": 27,
+        "min_temperature_hour": "2:00 pm",
+        "max_rain": 60,
+        "max_rain_hour": "4:00 pm",
+    }
+    assert actual == expected, (
+        f"Case 4 mismatch\nexpected: {expected}\nactual:   {actual}"
+    )
+    print("Case 4 (working hours 7:00 AM to 4:00 PM): PASS")
+    print(actual)
+
+
+def case_6():
+    context = ssl.create_default_context(cafile="/etc/ssl/cert.pem")
+    request = urllib.request.Request(
+        build_geocoding_url("Provo"),
+        headers={"Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=20, context=context) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    matches = parse_geocoding_results(payload)
+    provo = next(
+        (
+            match for match in matches
+            if match["name"].lower() == "provo"
+            and match["admin1"] == "Utah"
+        ),
+        None,
+    )
+    assert provo is not None, "Provo, Utah was not in geocoding results"
+    assert abs(provo["latitude"] - 40.23) <= 0.1
+    assert abs(provo["longitude"] - (-111.66)) <= 0.1
+    print("Case 6 (city search for Provo): PASS")
+    print(provo)
 
 
 if __name__ == "__main__":
