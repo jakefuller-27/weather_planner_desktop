@@ -1,11 +1,12 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
 import json
 import threading
 import urllib.request
 import ssl
 import os
 from datetime import datetime
+from jobsites import load_jobsite, save_jobsite
 
 from calc import (
     DEFAULT_LOCATION,
@@ -47,9 +48,11 @@ class WeatherPlannerApp(tk.Tk):
         self.daily_ratings = []
         self.day_labels = list(DAYS)
         self.valid_start_hour = 0
-        self.valid_end_hour = 23
+        self.valid_end_hour = 23 * 60 + 59
         self.working_start_hour = 0
-        self.working_end_hour = 23
+        self.working_end_hour = 23 * 60 + 59
+        self.valid_start_label = "12:00 AM"
+        self.valid_end_label = "11:59 PM"
 
         style = ttk.Style(self)
         style.theme_use("clam")
@@ -217,7 +220,7 @@ class WeatherPlannerApp(tk.Tk):
                 hour += 12
             if meridiem == "AM" and hour == 12:
                 hour = 0
-            return hour
+            return hour * 60 + minute
         except (ValueError, AttributeError):
             return 0
 
@@ -234,6 +237,8 @@ class WeatherPlannerApp(tk.Tk):
         self.valid_end_hour = end
         self.working_start_hour = start
         self.working_end_hour = end
+        self.valid_start_label = self.start_hour.get()
+        self.valid_end_label = self.end_hour.get()
         self.working_hours_label.configure(
             text=(f"Ratings use working hours "
                   f"{self.start_hour.get()} to {self.end_hour.get()}.")
@@ -246,8 +251,8 @@ class WeatherPlannerApp(tk.Tk):
         hourly = self.forecast_data.get("hourly", {})
         self.daily_forecast = aggregate_daily(
             hourly,
-            start_hour=self.valid_start_hour,
-            end_hour=self.valid_end_hour,
+            start_hour=self.valid_start_hour // 60,
+            end_hour=self.valid_end_hour // 60,
         )
         self.daily_ratings = [
             rate_daily(day) for day in self.daily_forecast
@@ -374,6 +379,12 @@ class WeatherPlannerApp(tk.Tk):
             style="Accent.TButton", command=self.refresh_forecast
         )
         self.refresh_button.grid(row=0, column=1, padx=(10, 0))
+        ttk.Button(
+            jobsite, text="Save jobsite", command=self.save_current_jobsite
+        ).grid(row=0, column=2, padx=(8, 0))
+        ttk.Button(
+            jobsite, text="Open jobsite", command=self.open_saved_jobsite
+        ).grid(row=0, column=3, padx=(8, 0))
 
         hours = (
             "12:00 AM", "1:00 AM", "2:00 AM", "3:00 AM",
@@ -724,13 +735,63 @@ class WeatherPlannerApp(tk.Tk):
     def initial_forecast(self):
         self.fetch_forecast(dict(DEFAULT_LOCATION))
 
+    def save_current_jobsite(self):
+        path = filedialog.asksaveasfilename(
+            title="Save jobsite",
+            defaultextension=".json",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        payload = {
+            "jobsite_name": self.selected_location["name"],
+            "latitude": self.selected_location["latitude"],
+            "longitude": self.selected_location["longitude"],
+            "time_zone": self.selected_location["time_zone"],
+            "start_hour": self.valid_start_label,
+            "end_hour": self.valid_end_label,
+        }
+        try:
+            save_jobsite(path, payload)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Could not save jobsite", str(exc), parent=self)
+            return
+        messagebox.showinfo(
+            "Jobsite saved", "The jobsite was saved successfully.", parent=self
+        )
+
+    def open_saved_jobsite(self):
+        path = filedialog.askopenfilename(
+            title="Open jobsite",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            saved = load_jobsite(path)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            messagebox.showerror(
+                "Could not open jobsite",
+                f"The selected file is invalid or unavailable.\n\n{exc}",
+                parent=self,
+            )
+            return
+
+        candidate = {
+            "name": saved["jobsite_name"],
+            "latitude": saved["latitude"],
+            "longitude": saved["longitude"],
+            "time_zone": saved["time_zone"],
+        }
+        self.fetch_forecast(candidate, pending_jobsite=saved)
+
     def refresh_forecast(self):
         self.fetch_forecast(dict(self.selected_location))
 
     def try_again(self):
         self.fetch_forecast(dict(self.selected_location))
 
-    def fetch_forecast(self, candidate):
+    def fetch_forecast(self, candidate, pending_jobsite=None):
         self.loading_label.grid(row=0, column=0, sticky="w")
         self.error_label.grid_remove()
         self.try_again_button.grid_remove()
@@ -761,14 +822,16 @@ class WeatherPlannerApp(tk.Tk):
                     data = json.loads(response.read().decode("utf-8"))
                 self.after(
                     0,
-                    lambda: self.forecast_succeeded(candidate, data),
+                    lambda: self.forecast_succeeded(
+                        candidate, data, pending_jobsite
+                    ),
                 )
             except Exception:
                 self.after(0, lambda: self.forecast_failed())
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def forecast_succeeded(self, candidate, data):
+    def forecast_succeeded(self, candidate, data, pending_jobsite=None):
         hourly = data.get("hourly", {})
         required = (
             "time",
@@ -782,7 +845,15 @@ class WeatherPlannerApp(tk.Tk):
             self.forecast_failed()
             return
 
-        time_zone = data.get("timezone", "")
+        api_time_zone = data.get("timezone", "")
+        if not api_time_zone:
+            self.forecast_failed()
+            return
+        time_zone = (
+            pending_jobsite["time_zone"]
+            if pending_jobsite is not None
+            else api_time_zone
+        )
         if not time_zone:
             self.forecast_failed()
             return
@@ -797,12 +868,27 @@ class WeatherPlannerApp(tk.Tk):
             "longitude": longitude,
             "time_zone": time_zone,
         }
+        if pending_jobsite is not None:
+            self.valid_start_hour = pending_jobsite["start_hour_value"]
+            self.valid_end_hour = pending_jobsite["end_hour_value"]
+            self.working_start_hour = self.valid_start_hour
+            self.working_end_hour = self.valid_end_hour
+            self.valid_start_label = pending_jobsite["start_hour"]
+            self.valid_end_label = pending_jobsite["end_hour"]
+            self.start_hour.set(pending_jobsite["start_hour"])
+            self.end_hour.set(pending_jobsite["end_hour"])
+            self.hours_validation.configure(text="")
+            self.working_hours_label.configure(
+                text=(f"Ratings use working hours "
+                      f"{pending_jobsite['start_hour']} to "
+                      f"{pending_jobsite['end_hour']}.")
+            )
         self.map_center = (latitude, longitude)
         self.forecast_data = data
         self.daily_forecast = aggregate_daily(
             hourly,
-            start_hour=self.valid_start_hour,
-            end_hour=self.valid_end_hour,
+            start_hour=self.valid_start_hour // 60,
+            end_hour=self.valid_end_hour // 60,
         )
         self.daily_ratings = [
             rate_daily(day) for day in self.daily_forecast

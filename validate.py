@@ -2,6 +2,7 @@
 
 import json
 import ssl
+import tempfile
 import urllib.request
 
 from calc import (
@@ -14,6 +15,7 @@ from calc import (
     rate_daily,
     rate_roofing,
 )
+from jobsites import load_jobsite, save_jobsite
 
 
 FIXTURE_A = {
@@ -95,6 +97,7 @@ def main():
     case_4()
     case_6()
     case_5()
+    case_7()
 
 
 def _value(value, time="12:00 am"):
@@ -311,6 +314,47 @@ def case_5():
     print(f"Calculated Crane: {ratings['crane']['rating']}")
     print(f"Calculated Concrete: {ratings['concrete']['rating']}")
     print(f"Calculated Roofing: {ratings['roofing']['rating']}")
+
+
+def case_7():
+    saved_data = {
+        "jobsite_name": "Provo, Utah",
+        "latitude": 40.23384,
+        "longitude": -111.65853,
+        "time_zone": "America/Denver",
+        "start_hour": "7:00 AM",
+        "end_hour": "4:00 PM",
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        path = f"{directory}/jobsite.json"
+        save_jobsite(path, saved_data)
+        loaded = load_jobsite(path)
+        assert loaded["jobsite_name"] == saved_data["jobsite_name"]
+        assert loaded["latitude"] == saved_data["latitude"]
+        assert loaded["longitude"] == saved_data["longitude"]
+        assert loaded["time_zone"] == saved_data["time_zone"]
+        assert loaded["start_hour"] == saved_data["start_hour"]
+        assert loaded["end_hour"] == saved_data["end_hour"]
+
+        invalid_path = f"{directory}/invalid.json"
+        with open(invalid_path, "w", encoding="utf-8") as file:
+            file.write('{"latitude": 999}')
+        try:
+            load_jobsite(invalid_path)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid saved jobsite was accepted")
+
+        late_shift = dict(saved_data)
+        late_shift["start_hour"] = "11:00 PM"
+        late_shift["end_hour"] = "11:59 PM"
+        save_jobsite(path, late_shift)
+        assert load_jobsite(path)["end_hour_value"] > load_jobsite(
+            path
+        )["start_hour_value"]
+
+    print("Case 7 (jobsite save/open persistence): PASS")
 
 
 if __name__ == "__main__":
