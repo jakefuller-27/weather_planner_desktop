@@ -8,6 +8,14 @@ This is a single-file weather planning app that opens with West Jordan selected 
 ## Purpose
 Lets a construction manager click a jobsite on a map and see which of the next 7 local calendar days are GO, CAUTION, NO-GO, or NO DATA for crane lifts, concrete pours, and roofing.
 
+## Platform
+- Python 3 desktop app using Tkinter for the interface.
+- Entry point: app.py. Run with python3 app.py.
+- Packages: tkintermapview (clickable OpenStreetMap map inside Tkinter) and requests (web requests). Install with pip install tkintermapview requests.
+- Runs on macOS. Needs an internet connection.
+- All calculations (daily aggregation and ratings) live in calc.py with no Tkinter code in it. app.py only calls those functions and draws results.
+- Calendar cells are clickable colored Labels (not Buttons) so colors show on macOS.
+
 ## Inputs
 - Jobsite location:
   - Control: click a Leaflet map to move the jobsite marker.
@@ -279,6 +287,18 @@ I opened the app, clicked today's crane, concrete, and roofing cells for West Jo
 ### Stage 5: Responsive polish and validation
 - Finish exact colors, icons, legend, pull time, disclaimer, desktop and phone layouts, keyboard focus, contrast, tap targets, reduced-motion behavior, and zoom support.
 - Complete the Validation placeholder with one hand-worked case, app results, and match status. Check desktop and phone layouts, resize behavior, loading/error states, reasons-panel behavior, and NWS comparison.
+
+### Stage 6: Validation results
+- Fill in Case 5 and add the Validation results table.
+
+### Stage 7: New feature 1, Save and open jobsites
+- Save and open jobsite details using the desktop-only jobsite file feature.
+
+### Stage 8: New feature 2, Export CSV
+- Export forecast activity ratings and values to CSV.
+
+### Stage 9: Polish (units, labels, layout) and README
+- Polish units, labels, and layout, and document the app in a README.
 
 ## Added features
 
