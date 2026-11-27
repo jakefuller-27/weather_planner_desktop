@@ -129,11 +129,12 @@ class WeatherPlannerApp(tk.Tk):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         ttk.Label(header, text="Jobsite Weather Planner",
                   style="Title.TLabel").pack(anchor="w")
-        ttk.Label(
+        self.hint_label = ttk.Label(
             header,
             text="Click the map to move the jobsite. Click a calendar cell to see why.",
             style="Hint.TLabel",
-        ).pack(anchor="w", pady=(2, 0))
+        )
+        self.hint_label.pack(anchor="w", pady=(2, 0))
 
         search_frame = ttk.Frame(header)
         search_frame.pack(fill="x", pady=(10, 0))
@@ -200,7 +201,7 @@ class WeatherPlannerApp(tk.Tk):
             cx, cy - 18,
             text=(self.selected_location["name"]
                   if self.selected_location["name"] == "West Jordan, UT"
-                  else f"{latitude:.4f}, {longitude:.4f}"),
+                  else f"{latitude:.4f}°, {longitude:.4f}°"),
             fill="#1E2933",
             font=("TkDefaultFont", 9, "bold"),
             tags="map",
@@ -323,7 +324,7 @@ class WeatherPlannerApp(tk.Tk):
                 self.city_search_results,
                 text=label,
                 command=lambda m=match: self.select_city_match(m),
-            ).pack(side="left", padx=(0, 6), pady=2)
+            ).pack(fill="x", pady=2)
 
     def show_city_search_error(self):
         self.clear_search_results()
@@ -368,27 +369,29 @@ class WeatherPlannerApp(tk.Tk):
         lon = DEFAULT_LOCATION["longitude"]
         text = (
             f"{DEFAULT_LOCATION['name']}\n"
-            f"{lat:.4f}, {lon:.4f}\n"
-            f"{DEFAULT_LOCATION['time_zone']}"
+            f"Latitude: {lat:.4f}°, Longitude: {lon:.4f}°\n"
+            f"Time zone: {DEFAULT_LOCATION['time_zone']}"
         )
         self.jobsite_label = ttk.Label(jobsite, text=text, justify="left")
         self.jobsite_label.grid(
             row=0, column=0, sticky="w"
         )
+        actions = ttk.Frame(jobsite)
+        actions.grid(row=1, column=0, columnspan=5, sticky="w", pady=(8, 0))
         self.refresh_button = ttk.Button(
-            jobsite, text="Refresh", state="disabled",
+            actions, text="Refresh forecast", state="disabled",
             style="Accent.TButton", command=self.refresh_forecast
         )
-        self.refresh_button.grid(row=0, column=1, padx=(10, 0))
+        self.refresh_button.pack(side="left", padx=(0, 8))
         ttk.Button(
-            jobsite, text="Save jobsite", command=self.save_current_jobsite
-        ).grid(row=0, column=2, padx=(8, 0))
+            actions, text="Save jobsite", command=self.save_current_jobsite
+        ).pack(side="left", padx=(0, 8))
         ttk.Button(
-            jobsite, text="Open jobsite", command=self.open_saved_jobsite
-        ).grid(row=0, column=3, padx=(8, 0))
+            actions, text="Open jobsite", command=self.open_saved_jobsite
+        ).pack(side="left", padx=(0, 8))
         ttk.Button(
-            jobsite, text="Export CSV", command=self.export_csv
-        ).grid(row=0, column=4, padx=(8, 0))
+            actions, text="Export CSV", command=self.export_csv
+        ).pack(side="left")
 
         hours = (
             "12:00 AM", "1:00 AM", "2:00 AM", "3:00 AM",
@@ -400,15 +403,15 @@ class WeatherPlannerApp(tk.Tk):
             "11:59 PM",
         )
         hours_frame = ttk.Frame(jobsite)
-        hours_frame.grid(row=1, column=0, columnspan=2,
+        hours_frame.grid(row=2, column=0, columnspan=5,
                          sticky="w", pady=(8, 0))
-        ttk.Label(hours_frame, text="Start").pack(side="left")
+        ttk.Label(hours_frame, text="Start time").pack(side="left")
         self.start_hour = ttk.Combobox(
             hours_frame, values=hours, state="readonly", width=10
         )
         self.start_hour.set("12:00 AM")
         self.start_hour.pack(side="left", padx=(5, 12))
-        ttk.Label(hours_frame, text="End").pack(side="left")
+        ttk.Label(hours_frame, text="End time").pack(side="left")
         self.end_hour = ttk.Combobox(
             hours_frame, values=hours, state="readonly", width=10
         )
@@ -532,32 +535,58 @@ class WeatherPlannerApp(tk.Tk):
                         values = f"Low: {rating_data['temperature'] if rating_data['temperature'] is not None else '--'} \u00b0F"
                     else:
                         values = f"Rain: {rating_data['rain'] if rating_data['rain'] is not None else '--'}%"
-                self.make_rating_button(
+                self.make_rating_label(
                     grid, status, values, row, column,
                     activity=activity, day=day, rating_data=rating_data
                 )
         self.desktop_calendar = grid
 
-    def make_rating_button(self, parent, status, values, row, column,
-                           activity=None, day=None, rating_data=None):
-        frame = tk.Frame(parent, bg="#FFFFFF", highlightthickness=1,
-                         highlightbackground=BORDER)
-        frame.grid(row=row, column=column, sticky="nsew", padx=0, pady=0)
-        frame.rowconfigure(0, weight=1)
-        frame.columnconfigure(0, weight=1)
+    def make_rating_label(self, parent, status, values, row, column,
+                          activity=None, day=None, rating_data=None):
         icon = RATING_ICONS.get(status, STATUS_ICONS[status])
         text = f"{icon}  {status}\n\n{values}"
-        foreground = "#202020" if status == "CAUTION" else RATING_COLORS[status]
-        button = tk.Button(
-            frame, text=text, fg=foreground, bg="#FFFFFF",
-            activebackground="#EDF3F7", activeforeground=foreground,
-            relief="flat", bd=0, justify="center",
-            font=("TkDefaultFont", 9, "bold"), cursor="hand2",
-            command=(lambda: self.open_reasons(
-                activity, day, rating_data
-            )) if activity is not None else None,
+        foreground = "#202020" if status == "CAUTION" else "#FFFFFF"
+        callback = lambda: self.open_reasons(activity, day, rating_data)
+        label = tk.Label(
+            parent,
+            text=text,
+            fg=foreground,
+            bg=RATING_COLORS[status],
+            activeforeground=foreground,
+            activebackground=RATING_COLORS[status],
+            relief="solid",
+            bd=1,
+            justify="center",
+            anchor="center",
+            font=("TkDefaultFont", 9, "bold"),
+            cursor="hand2",
+            takefocus=True,
+            wraplength=125,
+            padx=4,
+            pady=8,
+            highlightthickness=0,
         )
-        button.grid(row=0, column=0, sticky="nsew", ipadx=4, ipady=8)
+        label.grid(row=row, column=column, sticky="nsew")
+        label.bind(
+            "<Configure>",
+            lambda event, widget=label: widget.configure(
+                wraplength=max(52, event.width - 10)
+            ),
+        )
+        label.bind("<Button-1>", lambda event: callback())
+        label.bind("<Return>", lambda event: callback())
+        label.bind("<space>", lambda event: callback())
+        label.bind(
+            "<FocusIn>",
+            lambda event: label.configure(
+                highlightthickness=2, highlightbackground=ACCENT,
+                highlightcolor=ACCENT
+            ),
+        )
+        label.bind(
+            "<FocusOut>",
+            lambda event: label.configure(highlightthickness=0),
+        )
 
     def show_phone_cards(self):
         if self.phone_calendar is not None:
@@ -611,20 +640,51 @@ class WeatherPlannerApp(tk.Tk):
                         values = f"Low {rating_data['temperature'] if rating_data['temperature'] is not None else '--'} \u00b0F"
                     else:
                         values = f"Rain {rating_data['rain'] if rating_data['rain'] is not None else '--'}%"
-                foreground = "#202020" if status == "CAUTION" else RATING_COLORS[status]
-                tk.Button(
+                foreground = "#202020" if status == "CAUTION" else "#FFFFFF"
+                label = tk.Label(
                     card,
                     text=f"{RATING_ICONS[status]}  {status}   {activity} · {values}",
                     fg=foreground,
-                    bg="#FFFFFF",
-                    activebackground="#EDF3F7",
+                    bg=RATING_COLORS[status],
                     relief="solid",
                     bd=1,
-                    font=("TkDefaultFont", 9),
+                    font=("TkDefaultFont", 9, "bold"),
                     cursor="hand2",
-                    command=(lambda a=activity, d=day_data, r=rating_data:
-                             self.open_reasons(a, d, r)),
-                ).pack(fill="x", pady=3, ipady=5)
+                    takefocus=True,
+                    anchor="w",
+                    justify="left",
+                    wraplength=620,
+                    padx=10,
+                    pady=8,
+                    highlightthickness=0,
+                )
+                label.pack(fill="x", pady=3)
+                label.bind(
+                    "<Configure>",
+                    lambda event, widget=label: widget.configure(
+                        wraplength=max(120, event.width - 24)
+                    ),
+                )
+                callback = (
+                    lambda a=activity, d=day_data, r=rating_data:
+                    self.open_reasons(a, d, r)
+                )
+                label.bind("<Button-1>", lambda event, cb=callback: cb())
+                label.bind("<Return>", lambda event, cb=callback: cb())
+                label.bind("<space>", lambda event, cb=callback: cb())
+                label.bind(
+                    "<FocusIn>",
+                    lambda event, widget=label: widget.configure(
+                        highlightthickness=2, highlightbackground=ACCENT,
+                        highlightcolor=ACCENT
+                    ),
+                )
+                label.bind(
+                    "<FocusOut>",
+                    lambda event, widget=label: widget.configure(
+                        highlightthickness=0
+                    ),
+                )
         self.phone_calendar = cards
 
     def build_pull_line(self, parent):
@@ -668,6 +728,7 @@ class WeatherPlannerApp(tk.Tk):
             text="Select a calendar cell to see the variables and thresholds.",
             foreground=COOL_GRAY,
             justify="left",
+            wraplength=900,
         )
         self.reasons_text.pack(anchor="w", pady=(6, 0))
 
@@ -684,10 +745,10 @@ class WeatherPlannerApp(tk.Tk):
                 f"Date: {date}",
                 f"Rating: {rating}",
                 f"Sustained wind: {wind if wind is not None else '--'} mph "
-                f"(GO < 15; Caution 15–<20; NO-GO >= 20)"
+                f"(GO < 15 mph; CAUTION 15 to <20 mph; NO-GO >=20 mph)"
                 f"{' at ' + rating_data['wind_time'] if rating_data['wind_time'] else ''}",
                 f"Gust: {gust if gust is not None else '--'} mph "
-                "(GO < 20; Caution 20–<25; NO-GO >= 25)"
+                "(GO < 20 mph; CAUTION 20 to <25 mph; NO-GO >=25 mph)"
                 f"{' at ' + rating_data['gust_time'] if rating_data['gust_time'] else ''}",
                 f"Limiting variable: {rating_data['limiting']}",
                 "Wind is forecast at 10 m above ground and likely understates wind at boom height. "
@@ -700,7 +761,7 @@ class WeatherPlannerApp(tk.Tk):
                 f"Date: {date}",
                 f"Rating: {rating}",
                 f"Minimum temperature: {temperature if temperature is not None else '--'} °F "
-                "(GO >= 40; Caution 32–<40; NO-GO < 32)"
+                "(GO >=40 °F; CAUTION 32 to <40 °F; NO-GO <32 °F)"
                 f"{' at ' + rating_data['time'] if rating_data['time'] else ''}",
                 f"Limiting variable: {rating_data['limiting']}",
             ]
@@ -711,7 +772,7 @@ class WeatherPlannerApp(tk.Tk):
                 f"Date: {date}",
                 f"Rating: {rating}",
                 f"Maximum rain probability: {rain if rain is not None else '--'}% "
-                "(GO < 20; Caution 20–<50; NO-GO >= 50)"
+                "(GO <20%; CAUTION 20 to <50%; NO-GO >=50%)"
                 f"{' at ' + rating_data['time'] if rating_data['time'] else ''}",
                 f"Limiting variable: {rating_data['limiting']}",
             ]
@@ -724,17 +785,17 @@ class WeatherPlannerApp(tk.Tk):
         self.reasons_text.configure(text="\n".join(lines))
 
     def build_disclaimer(self, parent):
-        disclaimer = ttk.Label(
+        self.disclaimer_label = ttk.Label(
             parent,
             text=("Ratings are planning aids only, not work authorization. "
                   "Follow your site safety plan, manufacturer limits, and "
                   "applicable codes."),
             foreground="#4D5963",
             background="#EEF2F5",
-            wraplength=1080,
+            wraplength=900,
             justify="left",
         )
-        disclaimer.grid(row=8, column=0, sticky="ew", pady=(14, 0))
+        self.disclaimer_label.grid(row=8, column=0, sticky="ew", pady=(14, 0))
 
     def initial_forecast(self):
         self.fetch_forecast(dict(DEFAULT_LOCATION))
@@ -935,8 +996,9 @@ class WeatherPlannerApp(tk.Tk):
 
         self.jobsite_label.configure(
             text=(f"{self.selected_location['name']}\n"
-                  f"{latitude:.4f}, {longitude:.4f}\n"
-                  f"{time_zone}")
+                  f"Latitude: {latitude:.4f}°, "
+                  f"Longitude: {longitude:.4f}°\n"
+                  f"Time zone: {time_zone}")
         )
         now = datetime.now().astimezone()
         hour = now.strftime("%I").lstrip("0") or "0"
@@ -966,6 +1028,11 @@ class WeatherPlannerApp(tk.Tk):
         if event.widget is self:
             self.draw_map()
             self.update_layout()
+            wraplength = max(320, self.winfo_width() - 64)
+            self.hint_label.configure(wraplength=wraplength)
+            self.jobsite_label.configure(wraplength=wraplength)
+            self.reasons_text.configure(wraplength=wraplength)
+            self.disclaimer_label.configure(wraplength=wraplength)
 
 
 if __name__ == "__main__":
