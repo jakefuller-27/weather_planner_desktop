@@ -279,3 +279,21 @@ I opened the app, clicked today's crane, concrete, and roofing cells for West Jo
 ### Stage 5: Responsive polish and validation
 - Finish exact colors, icons, legend, pull time, disclaimer, desktop and phone layouts, keyboard focus, contrast, tap targets, reduced-motion behavior, and zoom support.
 - Complete the Validation placeholder with one hand-worked case, app results, and match status. Check desktop and phone layouts, resize behavior, loading/error states, reasons-panel behavior, and NWS comparison.
+
+## Added features
+
+### New desktop-only features
+
+2. **Export CSV**
+   - Export one row per forecast day and activity (7 days × 3 activities = 21 data rows), preceded by one header row.
+   - CSV columns, in this order:
+     1. Date (YYYY-MM-DD)
+     2. Activity (Crane, Concrete, or Roofing)
+     3. Rating (GO, CAUTION, NO-GO, or NO DATA)
+     4. Max sustained wind (mph) - Crane rows only, blank otherwise
+     5. Max gust (mph) - Crane rows only, blank otherwise
+     6. Min temperature (F) - Concrete rows only, blank otherwise
+     7. Max rain probability (%) - Roofing rows only, blank otherwise
+     8. Limiting variable
+     9. Working hours used (for example, 12:00 AM to 11:59 PM)
+   - Include units in populated measurement values.

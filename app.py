@@ -7,6 +7,7 @@ import ssl
 import os
 from datetime import datetime
 from jobsites import load_jobsite, save_jobsite
+from exports import write_forecast_csv
 
 from calc import (
     DEFAULT_LOCATION,
@@ -385,6 +386,9 @@ class WeatherPlannerApp(tk.Tk):
         ttk.Button(
             jobsite, text="Open jobsite", command=self.open_saved_jobsite
         ).grid(row=0, column=3, padx=(8, 0))
+        ttk.Button(
+            jobsite, text="Export CSV", command=self.export_csv
+        ).grid(row=0, column=4, padx=(8, 0))
 
         hours = (
             "12:00 AM", "1:00 AM", "2:00 AM", "3:00 AM",
@@ -784,6 +788,40 @@ class WeatherPlannerApp(tk.Tk):
             "time_zone": saved["time_zone"],
         }
         self.fetch_forecast(candidate, pending_jobsite=saved)
+
+    def export_csv(self):
+        if not self.forecast_data:
+            messagebox.showerror(
+                "Forecast unavailable",
+                "Load a forecast before exporting CSV.",
+                parent=self,
+            )
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export forecast CSV",
+            defaultextension=".csv",
+            filetypes=(("CSV files", "*.csv"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            row_count = write_forecast_csv(
+                path,
+                self.daily_forecast,
+                self.daily_ratings,
+                self.valid_start_label,
+                self.valid_end_label,
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            messagebox.showerror(
+                "Could not export CSV", str(exc), parent=self
+            )
+            return
+        messagebox.showinfo(
+            "CSV exported",
+            f"Exported {row_count} activity rows.",
+            parent=self,
+        )
 
     def refresh_forecast(self):
         self.fetch_forecast(dict(self.selected_location))

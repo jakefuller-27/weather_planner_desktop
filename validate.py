@@ -3,7 +3,9 @@
 import json
 import ssl
 import tempfile
+import csv
 import urllib.request
+from datetime import date, timedelta
 
 from calc import (
     aggregate_daily,
@@ -15,6 +17,7 @@ from calc import (
     rate_daily,
     rate_roofing,
 )
+from exports import CSV_COLUMNS, write_forecast_csv
 from jobsites import load_jobsite, save_jobsite
 
 
@@ -98,6 +101,7 @@ def main():
     case_6()
     case_5()
     case_7()
+    case_8()
 
 
 def _value(value, time="12:00 am"):
@@ -355,6 +359,58 @@ def case_7():
         )["start_hour_value"]
 
     print("Case 7 (jobsite save/open persistence): PASS")
+
+
+def case_8():
+    seven_day_fixture = {"time": []}
+    for variable in (
+        "wind_speed_10m",
+        "wind_gusts_10m",
+        "temperature_2m",
+        "precipitation_probability",
+    ):
+        seven_day_fixture[variable] = []
+
+    start_date = date.fromisoformat(FIXTURE_A["time"][0][:10])
+    for offset in range(7):
+        day = start_date + timedelta(days=offset)
+        seven_day_fixture["time"].extend(
+            f"{day.isoformat()}T{hour:02d}:00" for hour in range(24)
+        )
+        for variable in (
+            "wind_speed_10m",
+            "wind_gusts_10m",
+            "temperature_2m",
+            "precipitation_probability",
+        ):
+            seven_day_fixture[variable].extend(FIXTURE_A[variable])
+
+    daily = aggregate_daily(seven_day_fixture)
+    ratings = [rate_daily(day) for day in daily]
+    with tempfile.TemporaryDirectory() as directory:
+        path = f"{directory}/forecast.csv"
+        count = write_forecast_csv(
+            path, daily, ratings, "12:00 AM", "11:59 PM"
+        )
+        with open(path, newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            rows = list(reader)
+            assert tuple(reader.fieldnames) == CSV_COLUMNS
+
+    assert count == 21
+    assert len(rows) == 21
+    assert [row["Activity"] for row in rows[:3]] == [
+        "Crane", "Concrete", "Roofing"
+    ]
+    assert rows[0]["Max sustained wind (mph)"].endswith(" mph")
+    assert rows[0]["Max gust (mph)"].endswith(" mph")
+    assert rows[1]["Min temperature (F)"].endswith(" F")
+    assert rows[2]["Max rain probability (%)"].endswith(" %")
+    assert rows[0]["Min temperature (F)"] == ""
+    assert rows[1]["Max sustained wind (mph)"] == ""
+    assert rows[2]["Max gust (mph)"] == ""
+    assert rows[0]["Working hours used"] == "12:00 AM to 11:59 PM"
+    print("Case 8 (CSV export: 21 rows and required columns): PASS")
 
 
 if __name__ == "__main__":
